@@ -1,36 +1,86 @@
-# This is a basic workflow to help you get started with Actions
+name: SWE-bench Pro Evaluation (Gemini)
 
-name: CI
-
-# Controls when the workflow will run
 on:
-  # Triggers the workflow on push or pull request events but only for the "main" branch
-  push:
-    branches: [ "main" ]
-  pull_request:
-    branches: [ "main" ]
-
-  # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
+    inputs:
+      task_id:
+        description: 'Task ID to run'
+        required: true
+        default: 'internetarchive__openlibrary-c4eebe6677acc4629cb541a98d5e91311444f5d4'
 
-# A workflow run is made up of one or more jobs that can run sequentially or in parallel
 jobs:
-  # This workflow contains a single job called "build"
-  build:
-    # The type of runner that the job will run on
+  evaluate:
     runs-on: ubuntu-latest
+    container:
+      image: manojva/openlibrary-python312:latest
+      options: --user root
 
-    # Steps represent a sequence of tasks that will be executed as part of the job
+    env:
+      GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
     steps:
-      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-      - uses: actions/checkout@v4
+      - name: Checkout Hackathon Repo
+        uses: actions/checkout@v4
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      # Runs a set of commands using the runners shell
-      - name: Run a multi-line script
+      - name: Install Agent Dependencies
         run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
+          pip install google-generativeai
+
+      - name: Setup Workspace & Pre-verification
+        id: setup
+        run: |
+          # 1. Setup the Repository (Simulating the environment setup)
+          mkdir -p /testbed
+          cp -r /app/openlibrary /testbed/
+          cd /testbed/openlibrary
+          
+          # Specific setup for this task (as per requirements)
+          git config --global --add safe.directory /testbed/openlibrary
+          git reset --hard 84cc4ed5697b83a849e9106a09bfed501169cc20
+          git clean -fd
+          git checkout c4eebe6677acc4629cb541a98d5e91311444f5d4 -- openlibrary/tests/core/test_imports.py
+          
+          # 2. Run Pre-verification (Expect Failure)
+          echo "Running Pre-verification tests..."
+          set +e # Don't exit on failure
+          python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs > /github/workspace/pre_verification.log 2>&1
+          exit_code=$?
+          echo "Pre-verification exit code: $exit_code"
+          set -e
+
+      - name: Run Gemini Agent
+        run: |
+          # We run the agent from the workspace root, pointing it to the testbed
+          python run_agent.py
+
+      - name: Post-verification
+        id: post_test
+        run: |
+          cd /testbed/openlibrary
+          echo "Running Post-verification tests..."
+          set +e
+          python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs > /github/workspace/post_verification.log 2>&1
+          exit_code=$?
+          echo "Post-verification exit code: $exit_code"
+          echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
+          
+          # Generate Patch
+          git diff > /github/workspace/changes.patch
+          set -e
+
+      - name: Extract Metrics
+        run: |
+          # Pass the test success status (0 = pass) to the metrics script
+          python extract_metrics.py --test-exit-code ${{ steps.post_test.outputs.exit_code }}
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: evaluation-artifacts
+          path: |
+            agent.log
+            result.json
+            pre_verification.log
+            post_verification.log
+            changes.patch
+            prompts.md
