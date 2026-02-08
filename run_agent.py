@@ -6,7 +6,7 @@ import google.generativeai as genai
 
 # --- Configuration ---
 API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL_NAME = "gemini-1.5-pro-latest"
+MODEL_NAME = "gemini-1.5-flash" 
 LOG_FILE = "agent.log"
 WORKDIR = "/testbed/openlibrary"
 
@@ -68,12 +68,14 @@ def main():
     response = chat.send_message(task)
     
     # Simple loop to ensure it doesn't stop too early
-    for _ in range(10):
+    for i in range(10):
+        print(f"Agent Turn {i+1}...")
         if "TASK_COMPLETED" in response.text:
+            print("Task marked as completed by agent.")
             break
-        response = chat.send_message("Continue your work. Run tests to verify your fix.")
+        response = chat.send_message("Continue your work. If you have applied a fix, run the test to verify. If the test passes, say TASK_COMPLETED.")
         
-    # Log the history
+    # Log the history for the hackathon artifacts
     for msg in chat.history:
         for part in msg.parts:
             if fn := part.function_call:
