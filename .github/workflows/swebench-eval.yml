@@ -29,20 +29,23 @@ jobs:
       - name: Setup Workspace & Pre-verification
         id: setup
         run: |
-          # 1. Setup the Repository (Simulating the environment setup)
+          # 1. Setup the Repository via Clone
           mkdir -p /testbed
-          cp -r /app/openlibrary /testbed/
-          cd /testbed/openlibrary
+          cd /testbed
+          git clone https://github.com/internetarchive/openlibrary.git
+          cd openlibrary
           
-          # Specific setup for this task (as per requirements)
+          # 2. Reset to the specific buggy commit for this task
           git config --global --add safe.directory /testbed/openlibrary
           git reset --hard 84cc4ed5697b83a849e9106a09bfed501169cc20
           git clean -fd
+          
+          # 3. Checkout the specific test file needed
           git checkout c4eebe6677acc4629cb541a98d5e91311444f5d4 -- openlibrary/tests/core/test_imports.py
           
-          # 2. Run Pre-verification (Expect Failure)
+          # 4. Run Pre-verification (Expect Failure)
           echo "Running Pre-verification tests..."
-          set +e # Don't exit on failure
+          set +e
           python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs > /github/workspace/pre_verification.log 2>&1
           exit_code=$?
           echo "Pre-verification exit code: $exit_code"
@@ -50,7 +53,6 @@ jobs:
 
       - name: Run Gemini Agent
         run: |
-          # We run the agent from the workspace root, pointing it to the testbed
           python run_agent.py
 
       - name: Post-verification
@@ -61,16 +63,14 @@ jobs:
           set +e
           python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs > /github/workspace/post_verification.log 2>&1
           exit_code=$?
-          echo "Post-verification exit code: $exit_code"
           echo "exit_code=$exit_code" >> $GITHUB_OUTPUT
           
-          # Generate Patch
+          # Generate Diff Patch
           git diff > /github/workspace/changes.patch
           set -e
 
       - name: Extract Metrics
         run: |
-          # Pass the test success status (0 = pass) to the metrics script
           python extract_metrics.py --test-exit-code ${{ steps.post_test.outputs.exit_code }}
 
       - name: Upload Artifacts
