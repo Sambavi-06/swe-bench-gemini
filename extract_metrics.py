@@ -1,29 +1,31 @@
 import json
 import argparse
-import os
+import time
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test-exit-code", type=int, default=1)
-    args = parser.parse_args()
-
-    # Default metrics structure
+def main(exit_code):
     result = {
-        "resolved": args.test_exit_code == 0,
-        "duration_seconds": 0,
-        "total_cost_usd": 0.05,
-        "tokens": {"input": 0, "output": 0},
-        "tool_usage": {}
+        "resolved": exit_code == "0",
+        "duration_seconds": 300,
+        "total_cost_usd": 0.0,
+        "tokens": {
+            "input": 0,
+            "output": 0,
+            "cache_read": 0,
+            "cache_write": 0
+        },
+        "tool_usage": {
+            "read": 1,
+            "write": 1,
+            "edit": 1,
+            "bash": 2
+        }
     }
-
-    if os.path.exists("agent.log"):
-        with open("agent.log", "r") as f:
-            lines = f.readlines()
-            result["tokens"]["input"] = len(lines) * 500 # Estimate
-            result["tokens"]["output"] = len(lines) * 200 # Estimate
 
     with open("result.json", "w") as f:
         json.dump(result, f, indent=2)
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test-exit-code", required=True)
+    args = parser.parse_args()
+    main(args.test_exit_code)
