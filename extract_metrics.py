@@ -2,9 +2,16 @@ import json
 import argparse
 import time
 
-def main(exit_code):
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test-exit-code", type=int, required=True)
+    args = parser.parse_args()
+
+    # If post-verification tests pass, the task is resolved
+    resolved = args.test_exit_code == 0
+
     result = {
-        "resolved": exit_code == "0",
+        "resolved": resolved,
         "duration_seconds": 300,
         "total_cost_usd": 0.0,
         "tokens": {
@@ -24,8 +31,8 @@ def main(exit_code):
     with open("result.json", "w") as f:
         json.dump(result, f, indent=2)
 
+    print("Metrics written to result.json")
+    print("Resolved:", resolved)
+
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test-exit-code", required=True)
-    args = parser.parse_args()
-    main(args.test_exit_code)
+    main()
