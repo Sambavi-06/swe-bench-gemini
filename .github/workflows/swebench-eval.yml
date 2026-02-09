@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       task_id:
-        description: 'Task ID to run'
+        description: "Task ID to run"
         required: true
-        default: 'internetarchive__openlibrary-c4eebe6677acc4629cb541a98d5e91311444f5d4'
+        default: "internetarchive__openlibrary-c4eebe6677acc4629cb541a98d5e91311444f5d4"
 
 jobs:
   evaluate:
@@ -16,60 +16,98 @@ jobs:
       options: --user root
 
     env:
+      TASK_ID: ${{ github.event.inputs.task_id }}
+      PYTHONPATH: /testbed
       GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+      GEMINI_MODEL: gemini-1.5-pro
 
     steps:
-      - name: Checkout Hackathon Repo
+      - name: Checkout repository
         uses: actions/checkout@v4
+
+      - name: Prepare directories
+        run: |
+          mkdir -p /workspace/artifacts
+          mkdir -p /testbed
+
+      - name: Setup OpenLibrary repository
+        shell: bash
+        run: |
+          set -e
+          COMMIT_HASH=$(echo "$TASK_ID" | rev | cut -d'-' -f1 | rev)
+
+          git clone https://github.com/internetarchive/openlibrary.git /testbed || true
+          cd /testbed
+          git fetch --all
+          git checkout "$COMMIT_HASH"
+
+          apt-get update && apt-get install -y libpq-dev build-essential
+          python -m pip install --upgrade pip
+          pip install Cython setuptools wheel
+
+      - name: Pre-verification test (expected to fail)
+        shell: bash
+        run: |
+          set +e
+          cd /testbed
+          python -m pytest \
+            openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending \
+            -xvs | tee /workspace/artifacts/pre_verification.log
+          echo $? > /workspace/artifacts/pre_verification.exit
+          exit 0
+
+      - name: Assert pre-verification failed
+        shell: bash
+        run: |
+          [ "$(cat /workspace/artifacts/pre_verification.exit)" -ne 0 ] || exit 1
 
       - name: Install Gemini SDK
         run: |
+          pip install --upgrade google-generativeai
+
+      - name: Install Gemini SDK(google-genai)
+        run: |
           pip install --upgrade google-genai
 
-      - name: Setup Repository & Pre-verification
+      - name: Debug Gemini install
         run: |
-          mkdir -p /testbed
+          python - << 'EOF'
+          from google import genai
+          from google.genai import types
+          print("google-genai OK")
+          EOF
+          
+      - name: Run Gemini agent
+        shell: bash
+        run: |
+          python scripts/run_agent.py \
+          --task-id "$TASK_ID" \
+          --repo-path /testbed \
+          --log-path /workspace/artifacts/agent.log \
+          --prompt-log /workspace/artifacts/prompts.md \
+          --model "$GEMINI_MODEL"
+        env:
+          TASK_ID: internetarchive__openlibrary-c4eebe6677acc4629cb541a98d5e91311444f5d4
+          PYTHONPATH: /testbed
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL: gemini-1.5-pro
+
+
+      - name: Capture code changes
+        if: always()
+        run: |
           cd /testbed
-          git clone https://github.com/internetarchive/openlibrary.git
-          cd openlibrary
+          git diff > /workspace/artifacts/changes.patch || true
 
-          git config --global --add safe.directory /testbed/openlibrary
-          git reset --hard 84cc4ed5697b83a849e9106a09bfed501169cc20
-          git clean -fd
-          git checkout c4eebe6677acc4629cb541a98d5e91311444f5d4 -- openlibrary/tests/core/test_imports.py
-
-          set +e
-          python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs \
-            > /github/workspace/pre_verification.log 2>&1
-          set -e
-
-      - name: Run Gemini Agent
+      - name: Post-verification test
         run: |
-          python run_agent.py
+          cd /testbed
+          python -m pytest \
+            openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending \
+            -xvs | tee /workspace/artifacts/post_verification.log
 
-      - name: Post-verification
-        id: post
-        run: |
-          cd /testbed/openlibrary
-          set +e
-          python -m pytest openlibrary/tests/core/test_imports.py::TestImportItem::test_find_staged_or_pending -xvs \
-            > /github/workspace/post_verification.log 2>&1
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
-          git diff > /github/workspace/changes.patch
-          set -e
-
-      - name: Extract Metrics
-        run: |
-          python extract_metrics.py --test-exit-code ${{ steps.post.outputs.exit_code }}
-
-      - name: Upload Artifacts
+      - name: Upload evaluation artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: evaluation-artifacts
-          path: |
-            agent.log
-            prompts.md
-            result.json
-            pre_verification.log
-            post_verification.log
-            changes.patch
+          name: swebench-eval-artifacts
+          path: /workspace/artifacts
