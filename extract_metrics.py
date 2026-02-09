@@ -1,31 +1,28 @@
-import json
 import argparse
-import time
+import json
+import os
 
-def main(exit_code):
-    result = {
-        "resolved": exit_code == "0",
-        "duration_seconds": 300,
-        "total_cost_usd": 0.0,
-        "tokens": {
-            "input": 0,
-            "output": 0,
-            "cache_read": 0,
-            "cache_write": 0
-        },
-        "tool_usage": {
-            "read": 1,
-            "write": 1,
-            "edit": 1,
-            "bash": 2
-        }
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--agent-log", required=True)
+    parser.add_argument("--output", required=True)
+    args = parser.parse_args()
+
+    # Basic metric extraction
+    log_content = ""
+    if os.path.exists(args.agent_log):
+        with open(args.agent_log, "r") as f:
+            log_content = f.read()
+
+    metrics = {
+        "iterations": log_content.count("--- Iteration"),
+        "status": "completed" if "Fix successful" in log_content else "failed",
     }
 
-    with open("result.json", "w") as f:
-        json.dump(result, f, indent=2)
+    with open(args.output, "w") as f:
+        json.dump(metrics, f, indent=2)
+    
+    print(f"Metrics saved to {args.output}")
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--test-exit-code", required=True)
-    args = parser.parse_args()
-    main(args.test_exit_code)
+    main()
