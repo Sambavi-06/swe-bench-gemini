@@ -62,4 +62,3 @@ def run_bash(command):
         return "Error: Command timed out after 60 seconds."
     except Exception as e:
         return f"Error running bash: {e}"
-
